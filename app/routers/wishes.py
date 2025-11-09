@@ -1,8 +1,14 @@
-from fastapi import APIRouter, Depends, Query
+from __future__ import annotations
+
+from decimal import Decimal
+from typing import Any
+
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.auth import get_current_user
 from app.core.db import _DB
 from app.core.errors import AppValidationError, NotFoundError
+from app.core.jsonsec import JsonTooLargeError, safe_json_loads
 from app.models.wish import Wish
 
 MAX_IMPORT = 5000
@@ -16,7 +22,7 @@ def list_wishes(user: str = Depends(get_current_user)):
 
 
 @router.get("/price/less", response_model=list[Wish])
-def wishes_price_less(price: float, user: str = Depends(get_current_user)):
+def wishes_price_less(price: Decimal, user: str = Depends(get_current_user)):
     return [
         w
         for w in _DB["wishes"]
@@ -27,7 +33,7 @@ def wishes_price_less(price: float, user: str = Depends(get_current_user)):
 
 
 @router.get("/price/greater", response_model=list[Wish])
-def wishes_price_greater(price: float, user: str = Depends(get_current_user)):
+def wishes_price_greater(price: Decimal, user: str = Depends(get_current_user)):
     return [
         w
         for w in _DB["wishes"]
@@ -66,7 +72,7 @@ def get_sorted_wishes(
         key=lambda w: (
             w[key]
             if (key in w and w[key] is not None)
-            else (0 if key == "price_estimate" else "")
+            else (Decimal("0") if key == "price_estimate" else "")
         ),
         reverse=not ascending,
     )
@@ -79,18 +85,35 @@ def export_wishes(user: str = Depends(get_current_user)):
 
 
 @router.post("/import")
-def import_wishes(data: dict, user: str = Depends(get_current_user)):
-    imported = data.get("backup", [])
+async def import_wishes(request: Request, user: str = Depends(get_current_user)):
+    raw = await request.body()
+    try:
+        payload = safe_json_loads(raw)
+    except JsonTooLargeError:
+        raise AppValidationError("import body too large", status=413)
+    except ValueError:
+        raise AppValidationError("invalid import format")
+
+    imported = payload.get("backup", [])
     if not isinstance(imported, list):
         raise AppValidationError("invalid import format")
     if len(imported) > MAX_IMPORT:
         raise AppValidationError(f"import too large (>{MAX_IMPORT})", status=413)
-    for w in imported:
-        if not isinstance(w, dict) or "id" not in w or "title" not in w:
+
+    validated: list[dict[str, Any]] = []
+    for raw_item in imported:
+        if not isinstance(raw_item, dict):
             raise AppValidationError("invalid record schema")
-        w["owner"] = user
-        _DB["wishes"].append(w)
-    return {"status": "restored", "count": len(imported)}
+        obj = dict(raw_item)
+        obj["owner"] = user
+        try:
+            w = Wish.model_validate(obj)
+        except Exception:
+            raise AppValidationError("invalid record schema")
+        validated.append(w.model_dump())
+
+    _DB["wishes"].extend(validated)
+    return {"status": "restored", "count": len(validated)}
 
 
 @router.post("", response_model=Wish)
