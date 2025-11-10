@@ -1,8 +1,16 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
-      - PYTHONUNBUFFERED=1
-    profiles: ["dev"]
+      PYTHONUNBUFFERED: "1"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
