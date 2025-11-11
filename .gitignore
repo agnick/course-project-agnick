@@ -1,37 +1,25 @@
-# Python
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
 __pycache__/
 *.py[cod]
-*.so
 *.egg-info/
 dist/
 build/
 .venv/
-.env
+env/
+venv/
 .pytest_cache/
 .coverage
 
-# SQLite / Databases
+tests/
 *.db
 *.sqlite
 *.sqlite3
 
-# Alembic
 alembic/*.log
 alembic/__pycache__/
-alembic/env.py
-alembic/script.py.mako
-
-# Virtual environments
-.venv/
-env/
-venv/
-
-# IDE / Editors
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS / Misc
-.DS_Store
-Thumbs.db
