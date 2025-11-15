@@ -23,3 +23,8 @@ tests/
 
 alembic/*.log
 alembic/__pycache__/
+
+reports/
+reports-bandit.json
+coverage.xml
+junit.xml
