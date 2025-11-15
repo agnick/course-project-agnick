@@ -1,38 +1,115 @@
-name: CI
+name: CI/CD (full)
+
 on:
-  pull_request:
   push:
-    branches: [main]
+  pull_request:
+
 permissions:
   contents: read
+
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build:
+
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: "pip"
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-${{ matrix.python-version }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.python-version }}-pip-
+
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
+          pip install coverage bandit
 
-      - name: Lint & Format
+      - name: Ruff / Black / Isort
         run: |
-          ruff check --output-format=github .
+          ruff check .
           black --check .
           isort --check-only .
 
-      - name: Tests
-        run: pytest -q
+      - name: Bandit (security linter)
+        run: |
+          bandit -r app -f json -o reports-bandit.json || true
 
-      - name: Pre-commit (all files)
-        run: pre-commit run --all-files --hook-stage manual
+      - name: Run tests with coverage + junit
+        run: |
+          mkdir -p reports
+          coverage run -m pytest -q --disable-warnings --maxfail=1 --junitxml=reports/junit.xml
+          coverage xml -o reports/coverage.xml
+          coverage report -m
+
+      - name: Upload artifacts (reports)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-reports-${{ matrix.python-version }}
+          path: reports/**
+
+  docker-build:
+    name: Docker Build + Trivy Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          tags: wishlist:test-ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Trivy
+        uses: aquasecurity/trivy-action@0.22.0
+        with:
+          scan-type: image
+          image-ref: wishlist:test-ci
+          format: table
+          output: trivy-report.txt
+          severity: HIGH,CRITICAL
+
+      - name: Upload Trivy report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-scan
+          path: trivy-report.txt
+
+      - name: Save Docker image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: |
+            ~/.docker
