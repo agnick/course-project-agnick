@@ -1,0 +1,15 @@
+title = "course-project-agnick gitleaks config"
+
+[extend]
+
+[allowlist]
+description = "ignore non-sensitive patterns and artifacts"
+paths = [
+  "EVIDENCE/",
+]
+
+regexes = [
+  '''TEST_SECRET_DO_NOT_USE''',
+]
+
+commits = []
