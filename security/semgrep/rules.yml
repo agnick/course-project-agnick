@@ -1,0 +1,21 @@
+rules:
+  - id: py-no-eval-exec
+    languages: [python]
+    message: "Опасное использование eval()/exec() — возможен code injection."
+    severity: WARNING
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+    metadata:
+      category: security
+      cwe: "CWE-94: Improper Control of Generation of Code"
+
+  - id: py-unsafe-html-echo
+    languages: [python]
+    message: "Потенциально небезопасный вывод пользовательских данных в HTMLResponse."
+    severity: INFO
+    pattern: |
+      HTMLResponse(f"...{$X}...")
+    metadata:
+      category: security
+      cwe: "CWE-79: Cross-site Scripting"
