@@ -1,0 +1,9 @@
+waivers:
+  - id: "CVE-YYYY-XXXX"
+    package: "example-package"
+    version: "1.2.3"
+    severity: "High"
+    reason: "Транзитивная зависимость; не используется в прод-цепочке."
+    issue: "https://github.com/agnick/course-project-agnick/issues/XXX"
+    expires_at: "2026-12-31"
+    approved_by: "tutor@example.org"

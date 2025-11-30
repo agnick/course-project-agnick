@@ -28,3 +28,7 @@ reports/
 reports-bandit.json
 coverage.xml
 junit.xml
+
+EVIDENCE/
+!EVIDENCE/.gitkeep
+!EVIDENCE/P09/.gitkeep
