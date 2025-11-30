@@ -1,0 +1,12 @@
+waivers:
+  - id: "CVE-2024-47874"
+    package: "starlette"
+    version: "0.38.6"
+    severity: "High"
+    reason: >
+      Starlette DoS via multipart/form-data (GHSA-f96h-pmfr-66vw).
+      Фреймворк тянется как зависимость FastAPI; обновление до 0.40.0+
+      отложено, сервис не принимает большие multipart-запросы от внешних клиентов.
+    issue: "https://github.com/agnick/course-project-agnick/issues/4"
+    expires_at: "2025-12-31"
+    approved_by: "tutor@example.org"
