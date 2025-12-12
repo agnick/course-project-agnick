@@ -1,0 +1,153 @@
+name: Security - IaC & Container (P12)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "docker-compose.yaml"
+      - "compose.yml"
+      - "compose.yaml"
+      - "iac/**"
+      - "k8s/**"
+      - "security/**"
+      - ".github/workflows/ci-p12-iac-container.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - "docker-compose.yml"
+      - "docker-compose.yaml"
+      - "compose.yml"
+      - "compose.yaml"
+      - "iac/**"
+      - "k8s/**"
+      - "security/**"
+      - ".github/workflows/ci-p12-iac-container.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  p12_iac_container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure evidence dirs
+        run: |
+          mkdir -p EVIDENCE/P12
+          chmod -R 777 EVIDENCE/P12
+
+      - name: Hadolint (Dockerfile)
+        shell: bash
+        run: |
+          set +e
+          docker run --rm -v "$PWD":/work -w /work hadolint/hadolint:latest \
+            hadolint -f json -c /work/security/hadolint.yaml /work/Dockerfile \
+            > EVIDENCE/P12/hadolint_report.json
+          status=$?
+          set -e
+
+          if [ ! -s EVIDENCE/P12/hadolint_report.json ]; then
+            echo "{\"error\":\"hadolint_report.json was not generated\",\"exit_code\":$status}" > EVIDENCE/P12/hadolint_report.json
+          fi
+
+          echo "Hadolint exit code: $status"
+
+      - name: Checkov (IaC)
+        shell: bash
+        run: |
+          echo "Listing IaC directory:"
+          ls -la iac || true
+          find iac -maxdepth 2 -type f -print || true
+
+          set +e
+          docker run --rm -v "$PWD":/work -w /work bridgecrew/checkov:latest \
+            -d /work/iac \
+            --framework kubernetes \
+            --config-file /work/security/checkov.yaml \
+            -o json > EVIDENCE/P12/checkov_report.json
+          status=$?
+          set -e
+
+          if [ ! -s EVIDENCE/P12/checkov_report.json ]; then
+            echo "{\"error\":\"checkov_report.json was not generated\",\"exit_code\":$status}" > EVIDENCE/P12/checkov_report.json
+          fi
+
+          echo "Checkov exit code: $status"
+
+      - name: Build Docker image
+        shell: bash
+        run: |
+          docker build -t wishlist:p12 .
+
+      - name: Trivy (image)
+        shell: bash
+        run: |
+          set +e
+          docker run --rm \
+            -v "$PWD":/work \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:latest \
+            image wishlist:p12 \
+              --config /work/security/trivy.yaml \
+              --format json \
+              --output /work/EVIDENCE/P12/trivy_report.json
+          status=$?
+          set -e
+
+          if [ ! -s EVIDENCE/P12/trivy_report.json ]; then
+            echo "{\"error\":\"trivy_report.json was not generated\",\"exit_code\":$status}" > EVIDENCE/P12/trivy_report.json
+          fi
+
+          echo "Trivy exit code: $status"
+
+      - name: Build hardening summary
+        if: always()
+        shell: bash
+        run: |
+          echo "# P12 hardening summary" > EVIDENCE/P12/hardening_summary.md
+          echo "" >> EVIDENCE/P12/hardening_summary.md
+
+          echo "## Reports" >> EVIDENCE/P12/hardening_summary.md
+          echo "- Dockerfile lint: EVIDENCE/P12/hadolint_report.json" >> EVIDENCE/P12/hardening_summary.md
+          echo "- IaC scan: EVIDENCE/P12/checkov_report.json" >> EVIDENCE/P12/hardening_summary.md
+          echo "- Image scan: EVIDENCE/P12/trivy_report.json" >> EVIDENCE/P12/hardening_summary.md
+          echo "" >> EVIDENCE/P12/hardening_summary.md
+
+          echo "## Quick counts" >> EVIDENCE/P12/hardening_summary.md
+
+          if [ -s EVIDENCE/P12/hadolint_report.json ]; then
+            echo "- Hadolint issues: $(jq 'length' EVIDENCE/P12/hadolint_report.json 2>/dev/null || echo "?")" >> EVIDENCE/P12/hardening_summary.md
+          fi
+
+          if [ -s EVIDENCE/P12/checkov_report.json ]; then
+            echo "- Checkov failed: $(jq '.summary.failed' EVIDENCE/P12/checkov_report.json 2>/dev/null || echo "?"), passed: $(jq '.summary.passed' EVIDENCE/P12/checkov_report.json 2>/dev/null || echo "?")" >> EVIDENCE/P12/hardening_summary.md
+          fi
+
+          if [ -s EVIDENCE/P12/trivy_report.json ]; then
+            echo "- Trivy vulnerabilities (CRITICAL/HIGH):" >> EVIDENCE/P12/hardening_summary.md
+            jq -r '
+              [.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL" or .Severity=="HIGH") | .Severity]
+              | group_by(.) | map({sev: .[0], cnt: length}) | .[]
+              | "  - \(.sev): \(.cnt)"
+            ' EVIDENCE/P12/trivy_report.json 2>/dev/null >> EVIDENCE/P12/hardening_summary.md || true
+          fi
+
+          echo "" >> EVIDENCE/P12/hardening_summary.md
+          echo "Note: detailed reports are attached as workflow artifacts." >> EVIDENCE/P12/hardening_summary.md
+
+      - name: Upload P12 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: P12_EVIDENCE
+          path: EVIDENCE/P12
